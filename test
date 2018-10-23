@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# run inside the build directory after building
+set -ex
+
+rmr=bin/rmr
+mkview=bin/mkview
+
+$rmr a b
+mkdir a b
+echo this is a > a/a
+echo this is b > b/b
+
+#
+# simple bind mount tests
+#
+$rmr view
+$mkview view /
+
+$rmr view
+$mkview view .
+
+$rmr view
+$mkview view a
+
+$rmr view
+$mkview view . /tmp
+
+#
+# requires overlay
+#
+$rmr view
+$mkview view .: /tmp:
+
+# this test case doesn't really make sense, you're making a
+# view onto the rootfs and adding the current directory, but the rootfs
+# will already contain this directory.  It would make sense if the current
+# directory was mapped to something else.
+#$rmr view
+#$mkview view / .
+
+$rmr view
+$mkview view / .:somedir
+
+$rmr view
+$mkview view .:sub /tmp:sub
+
+$rmr view
+$mkview view .: /tmp:somedir
+
+$rmr view
+$mkview view .:sub /
+
+$rmr view
+$mkview view a b
+
+$rmr view
+$mkview view a: b:
+
+$rmr view
+$mkview view a:sub b:sub
+
+$rmr view
+$mkview view a: b:somedir
+
+$rmr view
+$mkview view /tmp:a .:
+
+$rmr view
+$mkview view b:somedir a:
+
+$rmr view
+$mkview view .: .:foo .:foo/bar
+
+$rmr view

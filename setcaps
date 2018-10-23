@@ -1,0 +1,5 @@
+#!/bin/sh
+set -ex
+sudo setcap cap_sys_admin+ep bin/mkview
+sudo setcap cap_sys_admin+ep bin/rmr
+sudo setcap cap_sys_chroot+ep bin/inroot

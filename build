@@ -1,0 +1,9 @@
+#!/bin/sh
+set -ex
+
+if [ ! -d bin ]; then
+   mkdir bin
+   meson --backend ninja bin
+fi
+ninja -C bin
+./setcaps
