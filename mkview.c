@@ -229,6 +229,9 @@ struct dir
 {
   const char *arg;
   const char *source;
+  // if given, this directory is to be writeable, and should be the
+  // upper directory of an overlay
+  const char *workdir;
 };
 DEFINE_TYPED_VECTOR(dir, struct dir);
 
@@ -418,21 +421,41 @@ static err_t mount_overlay(const char *target_dir, struct mount_point *mount_poi
   }
 
   //
-  // for now they will all be lower dirs
-  // in the future I'll probably support upper dirs
+  // get the size of all the directories and also,
+  // see if one of the directories has a 'workdir' meaning it should be the upper
   //
+  const size_t LOWERDIR_PREFIX_SIZE =  9; // "lowerdir="
+  const size_t UPPERDIR_PREFIX_SIZE = 10; // ",upperdir="
+  const size_t WORKDIR_PREFIX_SIZE  =  9; // ",workdir="
+
+  struct dir *upper_dir = NULL;
+  size_t upper_dir_size = 0;
+
   size_t lower_dirs_size = 0;
   for (size_t i = 0; i < dir_vector_size(&mount_point->dirs); i++) {
     struct dir *dir = dir_vector_get(&mount_point->dirs, i);
-    if (lower_dirs_size > 0)
-      lower_dirs_size++;
-    lower_dirs_size += strlen(dir->source);
+    if (dir->workdir) {
+      if (upper_dir) {
+        errf("mount point at '%s' has multiple upper directories '%s' and '%s'",
+             target_dir, upper_dir->arg, dir->arg);
+        return err_fail;
+      }
+      upper_dir = dir;
+      // ",upperdir=%s,workdir=%s"
+      upper_dir_size =
+        UPPERDIR_PREFIX_SIZE + // ",upperdir="
+        strlen(dir->source) + // <upperdir>
+        WORKDIR_PREFIX_SIZE + // ",workdir="
+        strlen(dir->workdir); // <workdir>
+    } else {
+      if (lower_dirs_size > 0)
+        lower_dirs_size++;
+      lower_dirs_size += strlen(dir->source);
+    }
   }
 
   // lowerdir=<lower_dirs>
-  // TODO: support upperdir
-  const int LOWERDIR_PREFIX_SIZE = 9;
-  size_t options_size = LOWERDIR_PREFIX_SIZE + lower_dirs_size;
+  size_t options_size = LOWERDIR_PREFIX_SIZE + lower_dirs_size + upper_dir_size;
   char *options = malloc(options_size + 1);
   if (!options) {
     errnof("malloc failed");
@@ -445,12 +468,30 @@ static err_t mount_overlay(const char *target_dir, struct mount_point *mount_poi
   offset += LOWERDIR_PREFIX_SIZE;
   for (size_t i = 0; i < dir_vector_size(&mount_point->dirs); i++) {
     struct dir *dir = dir_vector_get(&mount_point->dirs, i);
+    if (dir->workdir)
+      continue;
     if (offset > LOWERDIR_PREFIX_SIZE)
       options[offset++] = ':';
     lower_dirs_size += strlen(dir->source);
     size_t len = strlen(dir->source);
     memcpy(options + offset, dir->source, len);
     offset += len;
+  }
+  if (upper_dir) {
+    memcpy(options + offset, ",upperdir=", UPPERDIR_PREFIX_SIZE);
+    offset += UPPERDIR_PREFIX_SIZE;
+    {
+      size_t len = strlen(upper_dir->source);
+      memcpy(options + offset, upper_dir->source, len);
+      offset += len;
+    }
+    memcpy(options + offset, ",workdir=", WORKDIR_PREFIX_SIZE);
+    offset += WORKDIR_PREFIX_SIZE;
+    {
+      size_t len = strlen(upper_dir->workdir);
+      memcpy(options + offset, upper_dir->workdir, len);
+      offset += len;
+    }
   }
   if (offset != options_size) {
     errf("code bug: options_size %lu != offset %lu", options_size, offset);
@@ -572,10 +613,6 @@ static err_t make_mount_point(struct mount_point *mount_point);
 
 static err_t make_sub_mount_points(struct mount_point *mount_point)
 {
-  /*
-  if (prepare_sub_mounts(mount_point))
-    return err_fail;
-  */
   for (size_t i = 0; i < mount_point_vector_size(&mount_point->sub_mount_points); i++) {
     struct mount_point *sub_mount_point = mount_point_vector_get(&mount_point->sub_mount_points, i);
     err_t result = make_mount_point(sub_mount_point);
@@ -656,12 +693,21 @@ err_t verify_custom_target(const char *target)
 
 void usage()
 {
-  logf("Usage: mkview [-options] <view_dir> <dir>[:<target>]...");
-  logf("");
-  logf("Create a 'root-filesystem view' with the given <dir>/<target>s. The view is made");
-  logf("up of various bind and overlay mounts to compose the given directories. The view can");
-  logf("be cleaned up using 'rmr <view>' without removing files from the source directories.");
-  logf("");
+  logf("Usage: mkview [-options] <view_dir> <dirs>...");
+  logf();
+  logf("Create a 'root-filesystem view' with the given <dir>s. The view is made up of various");
+  logf("bind and overlay mounts. The view can be cleaned up using 'rmr <view_dir>' without");
+  logf("removing files from the source directories.");
+  logf();
+  logf("Each directory is of the form:");
+  logf("  [<workdir>,]<dir>[:<target_path>]...");
+  logf();
+  logf("If a <workdir> is given, then the directory will be writeable and will be the upper");
+  logf("directory if it is part of an overlay with other directories. <target_path> is the path");
+  logf("where this directory should be exposed on the resulting view.  If it is not given, it will");
+  logf("default to the path where the directory existing on the current filesystem.  This path should");
+  logf("NOT contain a leading slash '/', an empty path will result having the directory part of the");
+  logf("root directory of the new view.");
 }
 
 static struct mount_point root_mount_point;
@@ -722,26 +768,41 @@ err_t main(int argc, const char *argv[])
     struct dir *dir = &dirs[dir_index];
     dir->arg = dir_args[dir_index];
 
-    const char *colon_str = strchr(dir->arg, ':');
-    const char *arg_source;
-    const char *target_relative = NULL;
-    if (colon_str) {
-      arg_source = strndup(dir->arg, colon_str - dir->arg);
-      target_relative = colon_str + 1;
-      if (verify_custom_target(target_relative)) {
-        return err_fail; // error already loggeed
+    const char *source = dir->arg;
+    {
+      const char *comma_str = strchr(source, ',');
+      if (comma_str) {
+        dir->workdir = strndup(source, comma_str - source);
+        if (!dir->workdir) {
+          errnof("strndup failed");
+          return 1;
+        }
+        source = comma_str + 1;
       }
-    } else {
-      arg_source = dir->arg;
+    }
+    const char *target_relative = NULL;
+    {
+      const char *colon_str = strchr(source, ':');
+      if (colon_str) {
+        target_relative = colon_str + 1;
+        if (verify_custom_target(target_relative)) {
+          return err_fail; // error already loggeed
+        }
+        source = strndup(source, colon_str - source);
+        if (!source) {
+          errnof("strndup failed");
+          return 1;
+        }
+      }
     }
     struct stat path_stat;
-    if (-1 == stat(arg_source, &path_stat)) {
-      errnof("'%s'", arg_source);
+    if (-1 == stat(source, &path_stat)) {
+      errnof("'%s'", source);
       return current_error;
     }
-    dir->source = realpath2(arg_source);
+    dir->source = realpath2(source);
     if (dir->source == NULL) {
-      errnof("realpath('%s') failed", arg_source);
+      errnof("realpath('%s') failed", source);
       return current_error;
     }
     if (target_relative == NULL)

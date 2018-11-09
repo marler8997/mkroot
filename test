@@ -71,4 +71,18 @@ $mkview view b:somedir a:
 $rmr view
 $mkview view .: .:foo .:foo/bar
 
+#
+# upper directories
+#
+
+$rmr view
+$mkview view / b,a:
+# the workdir will probably have some left-over files that can't be removed
+sudo rm -rf b/*
+
+# TODO: verify this erro case where you have multiple upper directories
+#       at the same target path
+#$rmr view
+#$mkview view / b,a: b,a:
+
 $rmr view
