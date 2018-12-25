@@ -8,10 +8,14 @@
 mkview <view_dir> <dir>[:<target>]...
 ```
 
-Once you've created a view, you can use `chroot2` to execute a command inside it:
+Once you've created a view, you can use `chroot` or the provided `inroot` command to execute a command inside it:
 
 ```
-chroot2 <view_dir> <command>
+inroot <view_dir> <command>...
+```
+
+```
+sudo chroot <view_dir> <command>...
 ```
 
 You can use the `rmr` tool to cleanup a view directory. Unlike `rm`, `rmr` will unmount any directories and does not follow symbolic links, but instead removes the links.
@@ -36,18 +40,18 @@ The colon `:` character after `myimage` tells `mkview` to mount `myimage` at the
 Make a view with `/bin`, `/lib` and `/lib64` and chroot bash into it:
 ```
 mkview myview /bin /lib /lib64
-chroot2 myview /bin/bash
+inroot myview /bin/bash
 ```
 
 The same as the previous example, but mount `/bin` to `/hostbin`:
 ```
 mkview myview /bin:hostbin /lib /lib64
-chroot2 myview /hostbin/bash
+inroot myview /hostbin/bash
 ```
 
 This command will create a root directory that mirrors your current root directory but adds an additional overlay:
 ```
 mkview myview myimage: /
-chroot2 myview bash
+inroot myview bash
 # you can now access the files that are in the myimage directory as if myimage was installed to the root
 ```
