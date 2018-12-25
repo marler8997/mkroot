@@ -71,6 +71,9 @@ $mkview view b:somedir a:
 $rmr view
 $mkview view .: .:foo .:foo/bar
 
+$rmr view
+$mkview view /tmp: ~
+
 #
 # upper directories
 #

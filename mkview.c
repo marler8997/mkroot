@@ -312,6 +312,9 @@ static void print_mount_point(struct mount_point *mount_point, unsigned depth)
   for (size_t i = 0; i < dir_vector_size(&mount_point->dirs); i++) {
     struct dir *dir = dir_vector_get(&mount_point->dirs, i);
     print_tab(depth);logf("source %s", dir->source);
+    if (dir->workdir) {
+      print_tab(depth);logf("- workdir %s", dir->workdir);
+    }
   }
   print_mount_points(&mount_point->sub_mount_points, depth + 1);
 }
@@ -551,6 +554,7 @@ static err_t prepare_sub_mounts_helper(struct mount_point *mount_point,
     errnof("malloc failed");
     return err_fail;
   }
+  memset(tmpfs, 0, sizeof(*tmpfs));
 
   // TODO: I'm not sure that we should tmpfs onto the current mount point.
   const char *mount_target_dir = get_absolute_target(mount_point);
